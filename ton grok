@@ -1,0 +1,74 @@
+require('dotenv').config();
+const { Telegraf } = require('telegraf');
+const axios = require('axios');
+const { toNano } = require('@ton/crypto');
+
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// === GROK AI CALL ===
+async function askGrok(prompt) {
+  try {
+    const res = await axios.post('https://api.x.ai/v1/chat/completions', {
+      model: 'grok-4-latest',
+      messages: [
+        { role: 'system', content: 'You are Grok, a witty DeFi advisor. Use USD. Keep replies under 100 words. Add hustle tips.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 150
+    }, {
+      headers: {
+        'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    return res.data.choices[0].message.content;
+  } catch (err) {
+    return 'Grok is thinking... (check API key)';
+  }
+}
+
+// === DEFILLAMA YIELDS ===
+async function getYields() {
+  const res = await axios.get('https://yields.llama.fi/pools?chain=ton');
+  const top = res.data.data.slice(0, 3);
+  return top.map(p => `${p.name}: ${p.apy}% APY | $${p.tvl.toLocaleString()} TVL`).join('\n');
+}
+
+// === COMMANDS ===
+bot.start(ctx => ctx.reply(
+  'TON Yield Alerts + Grok AI\n' +
+  '/yields - Free scan\n' +
+  '/premium - $2 (0.3 TON) for Grok tips'
+));
+
+bot.command('yields', async (ctx) => {
+  const yields = await getYields();
+  ctx.reply(`Top TON Yields:\n${yields}\n\n/premium for Grok strategy`);
+});
+
+bot.command('premium', async (ctx) => {
+  const yields = await getYields();
+  const grokTip = await askGrok(`2-sentence TON staking move based on: ${yields}`);
+  ctx.reply(
+    `${yields}\n\nGrok says: ${grokTip}\n\nPay $2 (0.3 TON) → /pay`,
+    { reply_markup: { inline_keyboard: [[{ text: 'Pay $2 (0.3 TON)', callback_data: 'pay' }]] } }
+  );
+});
+
+bot.on('callback_query', async (ctx) => {
+  if (ctx.callbackQuery.data === 'pay') {
+    ctx.answerCbQuery();
+    ctx.reply(`Send 0.3 TON to:\n\n\`${process.env.WALLET_ADDRESS}\`\n\nThen type /confirm`, { parse_mode: 'Markdown' });
+  }
+});
+
+bot.command('confirm', async (ctx) => {
+  const yields = await getYields();
+  const full = await askGrok(`Detailed TON staking plan for $100 budget: ${yields}`);
+  ctx.reply(`Premium Unlocked!\n\n${full}\n\nDaily Grok tips activated.`);
+});
+
+// === LAUNCH ===
+bot.launch();
+console.log('Grok TON Yield Bot LIVE on Vercel!');
